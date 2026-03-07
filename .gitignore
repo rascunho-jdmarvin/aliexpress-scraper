@@ -19,3 +19,4 @@ var/
 .env
 description-aliexpress.md
 scrap-test.py
+fng-importer.json

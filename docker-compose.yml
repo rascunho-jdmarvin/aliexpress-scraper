@@ -1,11 +1,36 @@
 services:
+  redis:
+    image: redis:alpine
+    container_name: aliexpress-scraper-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   api:
     build: .
     container_name: aliexpress-scraper-api
+    command: [ "python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload" ]
     ports:
       - "8000:8000"
+      - "5678:5678" # <-- Expose the debug 
     env_file:
       - .env
     volumes:
       - ./app:/app/app
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: aliexpress-scraper-worker
+    command: [ "python", "-m", "debugpy", "--listen", "0.0.0.0:5679", "-m", "celery", "-A", "app.celery_app", "worker", "--loglevel=info" ]
+    ports:
+      - "5679:5679" # <-- Expose the Celery debug port
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - redis
     restart: unless-stopped

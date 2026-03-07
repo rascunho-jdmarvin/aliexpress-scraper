@@ -23,7 +23,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from app.config import settings
 from app.models.product import ProductData, VariantCombination, StoreInfo, MediaItem, ProductOption
-from app.scraper.extract_aliexpress_description import get_description_with_playwright
 
 logger = logging.getLogger(__name__)
 

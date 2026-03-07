@@ -17,7 +17,7 @@
         },
         {
             "name": "Celery",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "celery",
             "console": "integratedTerminal",
@@ -30,6 +30,36 @@
                 "--concurrency=5",
                 "-Q",
                 "scraping"
+            ]
+        },
+        {
+            "name": "Python: Attach to FastAPI (Docker)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/app",
+                    "remoteRoot": "/app/app"
+                }
+            ]
+        },
+        {
+            "name": "Python: Attach to Celery (Docker)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5679
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/app",
+                    "remoteRoot": "/app/app"
+                }
             ]
         }
     ]

@@ -19,3 +19,5 @@ redis==5.0.7
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 cryptography==42.0.8
+bcrypt==4.3.0
+debugpy==1.8.0

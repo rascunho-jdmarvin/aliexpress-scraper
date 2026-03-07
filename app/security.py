@@ -31,9 +31,15 @@ def encrypt_data(data: str) -> bytes:
         raise TypeError("O dado a ser criptografado deve ser uma string.")
     return fernet.encrypt(data.encode())
 
-def decrypt_data(encrypted_data: bytes) -> str:
+def decrypt_data(encrypted_data) -> str:
     """Descriptografa bytes e retorna uma string."""
-    if not isinstance(encrypted_data, bytes):
+    if isinstance(encrypted_data, str):
+        if encrypted_data.startswith("\\x"):
+            # O Supabase/PostgREST serializa BYTEA como uma string hexadecimal começando com \x
+            encrypted_data = bytes.fromhex(encrypted_data[2:])
+        else:
+            encrypted_data = encrypted_data.encode('latin-1')
+    elif not isinstance(encrypted_data, bytes):
         # O psycopg2 pode retornar `memoryview`, então convertemos para bytes.
         encrypted_data = bytes(encrypted_data)
     return fernet.decrypt(encrypted_data).decode()

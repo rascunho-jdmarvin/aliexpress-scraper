@@ -217,11 +217,9 @@ class SupabaseDB:
                 "product_url_encrypted": encrypted_url.decode('latin-1'), # Supabase-py espera uma string
                 "status": "PENDING"
             })
-            .select("*")
-            .single()
             .execute()
         )
-        return response.data
+        return response.data[0]
 
     async def update_import_job(
         self,

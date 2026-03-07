@@ -4,7 +4,10 @@ A FastAPI application that scrapes AliExpress product pages and stores structure
 
 ## Running Locally with Docker
 
-You can easily run this application locally on your machine using Docker and Docker Compose. This ensures all system dependencies required by Playwright are correctly installed.
+You can easily run this application locally on your machine using Docker and Docker Compose. The setup spins up three containers:
+- **api**: The main FastAPI application.
+- **redis**: The Redis message broker for background task queues.
+- **worker**: The Celery worker to handle long-running background scraping tasks.
 
 ### Prerequisites
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed on your machine.
@@ -20,10 +23,11 @@ You can easily run this application locally on your machine using Docker and Doc
    # Add any other variables you need
    ```
 
-2. **Build and start the container:**
+2. **Build and start the microservice containers:**
    ```bash
    docker compose up -d --build
    ```
+   This command starts the API, Redis, and Celery worker in the background.
 
 3. **Verify it's running:**
    Check the API health endpoint:
