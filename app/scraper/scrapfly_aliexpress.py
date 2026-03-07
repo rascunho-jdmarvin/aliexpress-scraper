@@ -68,15 +68,27 @@ _ITEM_ID_RE = re.compile(r"/item/(\d+)")
 # ---------------------------------------------------------------------------
 
 _client: Optional[ScrapflyClient] = None
+_clients: dict[str, ScrapflyClient] = {}
 
 
-def _get_client() -> ScrapflyClient:
-    global _client
-    if _client is None:
-        if not settings.scrapfly_api_key:
-            raise RuntimeError("SCRAPFLY_API_KEY is not configured in .env")
-        _client = ScrapflyClient(key=settings.scrapfly_api_key, max_concurrency=_MAX_CONCURRENT)
-    return _client
+def _get_client(api_key: str | None = None) -> ScrapflyClient:
+    """
+    Retorna um cliente Scrapfly.
+    Usa um cliente por chave de API para reutilização de conexão.
+    Se nenhuma chave for fornecida, usa a chave padrão das configurações.
+    """
+    global _clients
+    
+    key_to_use = api_key or settings.scrapfly_api_key
+    if not key_to_use:
+        raise RuntimeError("SCRAPFLY_API_KEY não está configurada.")
+
+    if key_to_use in _clients:
+        return _clients[key_to_use]
+
+    client = ScrapflyClient(key=key_to_use, max_concurrency=_MAX_CONCURRENT)
+    _clients[key_to_use] = client
+    return client
 
 
 def _detect_locale(url: str) -> dict[str, str]:
@@ -111,25 +123,25 @@ def _build_locale_cookie(locale: dict[str, str]) -> str:
     retry=retry_if_exception_type((ScrapflyError, TimeoutError, ConnectionError)),
     reraise=True,
 )
-async def scrape_product(url: str) -> ProductData:
+async def scrape_product(url: str, scrapfly_api_key: str | None = None) -> ProductData:
     """Scrape a single AliExpress product page via ScrapFly."""
     async with _semaphore:
-        return await _scrape(url)
+        return await _scrape(url, scrapfly_api_key)
 
 
-async def scrape_products_batch(urls: list[str]) -> list[ProductData | dict]:
+async def scrape_products_batch(urls: list[str], scrapfly_api_key: str | None = None) -> list[ProductData | dict]:
     """
     Scrape multiple products concurrently.
     Returns a list of ProductData on success or {"url": ..., "error": ...} on failure.
     Concurrency is capped by _MAX_CONCURRENT semaphore.
     """
-    tasks = [_scrape_safe(url) for url in urls]
+    tasks = [_scrape_safe(url, scrapfly_api_key) for url in urls]
     return await asyncio.gather(*tasks)
 
 
-async def _scrape_safe(url: str) -> ProductData | dict:
+async def _scrape_safe(url: str, scrapfly_api_key: str | None = None) -> ProductData | dict:
     try:
-        return await scrape_product(url)
+        return await scrape_product(url, scrapfly_api_key)
     except Exception as exc:
         logger.exception("Batch scrape failed for %s", url)
         return {"url": url, "error": str(exc)}
@@ -139,10 +151,10 @@ async def _scrape_safe(url: str) -> ProductData | dict:
 # Core scrape logic
 # ---------------------------------------------------------------------------
 
-async def _scrape(url: str) -> ProductData:
+async def _scrape(url: str, scrapfly_api_key: str | None = None) -> ProductData:
     item_id = _extract_item_id(url)
     locale = _detect_locale(url)
-    client = _get_client()
+    client = _get_client(api_key=scrapfly_api_key)
 
     logger.info("ScrapFly: scraping %s (country=%s, currency=%s)", url, locale["country"], locale["currency"])
 

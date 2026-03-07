@@ -17,7 +17,5 @@ parts/
 sdist/
 var/
 .env
-CLAUDE.md
-GEMINI.md
 description-aliexpress.md
 scrap-test.py

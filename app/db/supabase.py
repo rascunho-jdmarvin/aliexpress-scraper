@@ -3,6 +3,7 @@ Supabase database layer.
 All DB interactions go through this module so the rest of the app stays DB-agnostic.
 """
 import logging
+import json
 from typing import Any, Optional
 from datetime import datetime, timezone
 
@@ -162,5 +163,133 @@ class SupabaseDB:
 
     async def update_product_description(self, aliexpress_id: str, description: str) -> None:
         self.client.table("products").update({"description": description}).eq("aliexpress_id", aliexpress_id).execute()
+
+    # ------------------------------------------------------------------
+    # Clients
+    # ------------------------------------------------------------------
+
+    async def get_client_by_key_id(self, key_id: str) -> Optional[dict]:
+        """Busca um cliente pelo seu `key_id` público."""
+        response = (
+            self.client.table("clients")
+            .select("*")
+            .eq("key_id", key_id)
+            .maybe_single()
+            .execute()
+        )
+        return response.data
+
+    async def create_client(
+        self,
+        name: str,
+        hashed_secret: str,
+        encrypted_scrapfly_api_key: bytes,
+        key_id: str,
+    ) -> dict:
+        """Cria um novo cliente no banco de dados."""
+        response = (
+            self.client.table("clients")
+            .insert({
+                "name": name,
+                "key_id": key_id,
+                "key_secret_hash": hashed_secret,
+                "scrapfly_api_key": encrypted_scrapfly_api_key.decode('latin-1'),
+            })
+            .execute()
+        )
+        return response.data[0]
+
+    # ------------------------------------------------------------------
+    # Import Jobs (Celery Tasks)
+    # ------------------------------------------------------------------
+
+    async def create_import_job(self, client_id: str, product_url: str) -> dict:
+        """
+        Cria um novo registro de job de importação, criptografando a URL do produto.
+        """
+        from app.security import encrypt_data  # Evita importação circular
+
+        encrypted_url = encrypt_data(product_url)
+        response = (
+            self.client.table("import_jobs")
+            .insert({
+                "client_id": client_id,
+                "product_url_encrypted": encrypted_url.decode('latin-1'), # Supabase-py espera uma string
+                "status": "PENDING"
+            })
+            .select("*")
+            .single()
+            .execute()
+        )
+        return response.data
+
+    async def update_import_job(
+        self,
+        job_id: str,
+        status: str,
+        result: Optional[dict] = None,
+    ) -> None:
+        """
+        Atualiza o status de um job de importação.
+        Criptografa o resultado (sucesso ou erro) antes de salvar.
+        """
+        from app.security import encrypt_data # Evita importação circular
+
+        update_payload: dict[str, Any] = {"status": status}
+
+        if result:
+            # Serializa o dicionário para JSON e depois criptografa
+            result_str = json.dumps(result, ensure_ascii=False)
+            encrypted_result = encrypt_data(result_str)
+            update_payload["result_encrypted"] = encrypted_result.decode('latin-1')
+
+        if status in ("SUCCESS", "FAILED"):
+            update_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        (
+            self.client.table("import_jobs")
+            .update(update_payload)
+            .eq("id", job_id)
+            .execute()
+        )
+
+    async def get_import_job(self, job_id: str, client_id: str) -> Optional[dict]:
+        """
+        Busca um job de importação específico, garantindo que ele pertence ao cliente.
+        Descriptografa os campos necessários antes de retornar.
+        """
+        from app.security import decrypt_data # Evita importação circular
+
+        response = (
+            self.client.table("import_jobs")
+            .select("*")
+            .eq("id", job_id)
+            .eq("client_id", client_id)
+            .maybe_single()
+            .execute()
+        )
+
+        if not response.data:
+            return None
+
+        job_data = response.data
+        
+        # Descriptografar a URL do produto
+        if job_data.get("product_url_encrypted"):
+            try:
+                job_data["product_url"] = decrypt_data(job_data["product_url_encrypted"])
+            except Exception:
+                job_data["product_url"] = "[Falha ao descriptografar URL]"
+        
+        # Descriptografar o resultado
+        if job_data.get("result_encrypted"):
+            try:
+                decrypted_result_str = decrypt_data(job_data["result_encrypted"])
+                job_data["result"] = json.loads(decrypted_result_str)
+            except Exception:
+                 job_data["result"] = {"error": "[Falha ao descriptografar resultado]"}
+
+        return job_data
+
 # Singleton
 db = SupabaseDB()

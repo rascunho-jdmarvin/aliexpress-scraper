@@ -7,6 +7,12 @@ class Settings(BaseSettings):
     supabase_anon_key: str
     supabase_service_role_key: str
 
+    # Chave para criptografia de dados
+    encryption_key: str
+
+    # URL de conexão do Redis para o Celery
+    redis_url: str
+
     us_proxy_url: Optional[str] = None
 
     browser_headless: bool = True

@@ -12,3 +12,10 @@ fake-useragent==2.0.3
 scrapfly-sdk>=0.8.0
 lxml>=5.0.0
 setuptools
+
+# Novas dependências para microserviço
+celery==5.4.0
+redis==5.0.7
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+cryptography==42.0.8

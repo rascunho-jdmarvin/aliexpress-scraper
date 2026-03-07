@@ -14,6 +14,23 @@
                 "--reload"
             ],
             "jinja": true
+        },
+        {
+            "name": "Celery",
+            "type": "python",
+            "request": "launch",
+            "module": "celery",
+            "console": "integratedTerminal",
+            "args": [
+                "-A",
+                "app.tasks.celery",
+                "worker",
+                // "--pool=solo",
+                "--loglevel=info",
+                "--concurrency=5",
+                "-Q",
+                "scraping"
+            ]
         }
     ]
 }
