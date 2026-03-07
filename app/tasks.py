@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, name="tasks.scrape_product")
-def scrape_product_task(self, job_id: str, product_url: str, scrapfly_api_key: str):
+def scrape_product_task(self, job_id: str, product_url: str, scrapfly_api_key: str, client_id: str):
     """
     Tarefa Celery para fazer scraping de um produto do AliExpress.
     Orquestra o processo de scraping e atualiza o status do job no banco de dados.
@@ -29,11 +29,11 @@ def scrape_product_task(self, job_id: str, product_url: str, scrapfly_api_key: s
         )
 
         # 3. Salva o produto no banco de dados (upsert)
-        product_uuid = asyncio.run(db.upsert_product(product_data))
+        product_uuid = asyncio.run(db.upsert_product(product_data, client_id))
         
         logger.info("Scraping e upsert concluídos com sucesso para o job [ID: %s]. Produto UUID: %s", job_id, product_uuid)
 
-        scrape_description_task.delay(job_id, product_url, scrapfly_api_key)
+        scrape_description_task.delay(job_id, product_url, scrapfly_api_key, client_id, product_data.aliexpress_id)
 
         # 4. Atualiza o status do job para "SUCCESS"
         success_result = {
@@ -64,40 +64,29 @@ def scrape_product_task(self, job_id: str, product_url: str, scrapfly_api_key: s
         raise e
 
 @celery_app.task(bind=True, name="tasks.scrape_description")
-def scrape_description_task(self, job_id: str, product_url: str, scrapfly_api_key: str):
+def scrape_description_task(self, job_id: str, product_url: str, scrapfly_api_key: str, client_id: str, aliexpress_id: str):
     """
     Tarefa Celery para fazer scraping da descrição de um produto do AliExpress.
     Orquestra o processo de scraping e atualiza o status do job no banco de dados.
     """
-    from app.scraper.scrapfly_aliexpress import get_description_with_playwright
-    logger.info("Iniciando job de scraping [ID: %s] para a URL: %s", job_id, product_url)
-
-    # 1. Atualiza o status do job para "PROCESSING"
-    try:
-        asyncio.run(db.update_import_job(job_id=job_id, status="PROCESSING"))
-    except Exception as e:
-        logger.error("Falha ao atualizar o status do job para PROCESSING [ID: %s]: %s", job_id, e)
-        raise
+    from app.scraper.extract_aliexpress_description import get_description_with_playwright
+    logger.info("Iniciando job de scraping da descrição [ID: %s] para a URL: %s", job_id, product_url)
 
     try:
-        # 2. Executa o scraping
-        product_data = asyncio.run(
-            get_description_with_playwright(product_url, product_data.aliexpress_id)
+        # Executa o scraping da descrição (a própria função atualiza o banco de dados)
+        description_result = asyncio.run(
+            get_description_with_playwright(product_url, aliexpress_id, client_id)
         )
 
-        # 3. Salva o produto no banco de dados (upsert)
-        product_uuid = asyncio.run(db.upsert_product(product_data))
-        
-        logger.info("Scraping e upsert concluídos com sucesso para o job [ID: %s]. Produto UUID: %s", job_id, product_uuid)
+        logger.info("Scraping da descrição concluído com sucesso para o job [ID: %s]. %s", job_id, description_result)
 
-        # 4. Atualiza o status do job para "SUCCESS"
+        # Atualiza o resultado (caso queira injetar log adicional no banco)
         success_result = {
-            "message": "Produto importado com sucesso.",
-            "product_uuid": product_uuid
+            "message": "Descrição importada com sucesso.",
+            "description_log": description_result
         }
-        asyncio.run(
-            db.update_import_job(job_id=job_id, status="SUCCESS", result=success_result)
-        )
+        
+        # Opcional: Você pode manter SUCCESS ou adicionar outra propetry ao job.
         return success_result
 
     except Exception as e:

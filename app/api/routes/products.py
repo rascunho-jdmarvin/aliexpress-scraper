@@ -68,7 +68,8 @@ async def import_product(
         scrape_product_task.delay(
             job_id=job_id,
             product_url=request.product_url,
-            scrapfly_api_key=client.scrapfly_api_key
+            scrapfly_api_key=client.scrapfly_api_key,
+            client_id=str(client.id)
         )
 
         logger.info("Job de importação [ID: %s] criado para o cliente '%s' (ID: %s)", job_id, client.name, client.id)
@@ -150,7 +151,8 @@ async def reprocess_import_job(
     scrape_product_task.delay(
         job_id=job_id,
         product_url=product_url,
-        scrapfly_api_key=client.scrapfly_api_key
+        scrapfly_api_key=client.scrapfly_api_key,
+        client_id=str(client.id)
     )
 
     logger.info("Job de importação [ID: %s] reenfileirado para o cliente '%s'", job_id, client.name)
@@ -162,7 +164,10 @@ async def reprocess_import_job(
 # ---------------------------------------------------------------------------
 
 @router.post("/scrape", response_model=ScrapeResponse)
-async def scrape_product_sync(request: ScrapeRequest):
+async def scrape_product_sync(
+    request: ScrapeRequest,
+    client: Client = Depends(get_current_client)
+):
     """
     Scrape a product by URL using ScrapFly (ASP bypass + JS rendering).
     Auto-detects country/currency from the URL domain.
@@ -171,9 +176,9 @@ async def scrape_product_sync(request: ScrapeRequest):
     job_id = await db.create_scrape_job(request.url)
     try:
         await db.update_job_status(job_id, "running")
-        product = await scrape_product(request.url)
-        product_id = await db.upsert_product(product)
-        asyncio.create_task(get_description_with_playwright(product.url, product.aliexpress_id))
+        product = await scrape_product(request.url, client.scrapfly_api_key)
+        product_id = await db.upsert_product(product, str(client.id))
+        asyncio.create_task(get_description_with_playwright(product.url, product.aliexpress_id, str(client.id)))
         await db.update_job_status(job_id, "completed", product_id=product_id)
         return ScrapeResponse(job_id=job_id, status="completed", product=product)
     except Exception as exc:
@@ -190,13 +195,14 @@ async def scrape_product_sync(request: ScrapeRequest):
 async def scrape_product_async(
     request: ScrapeRequest,
     background_tasks: BackgroundTasks,
+    client: Client = Depends(get_current_client)
 ):
     """
     Kick off a background scrape job.
     Returns a job_id. Poll GET /products/jobs/{job_id} for results.
     """
     job_id = await db.create_scrape_job(request.url)
-    background_tasks.add_task(_run_scrape_job, job_id, request.url)
+    background_tasks.add_task(_run_scrape_job, job_id, request.url, str(client.id), client.scrapfly_api_key)
     return ScrapeResponse(job_id=job_id, status="pending")
 
 
@@ -205,13 +211,16 @@ async def scrape_product_async(
 # ---------------------------------------------------------------------------
 
 @router.post("/scrape/batch")
-async def scrape_batch(request: ScrapeBatchRequest):
+async def scrape_batch(
+    request: ScrapeBatchRequest,
+    client: Client = Depends(get_current_client)
+):
     """
     Scrape multiple products concurrently (max 20 URLs per batch).
     Auto-detects country/currency for each URL independently.
     Returns a list of results (product data or error for each URL).
     """
-    results = await scrape_products_batch(request.urls)
+    results = await scrape_products_batch(request.urls, client.scrapfly_api_key)
 
     output = []
     for result in results:
@@ -219,7 +228,7 @@ async def scrape_batch(request: ScrapeBatchRequest):
             output.append({"url": result["url"], "status": "failed", "error": result["error"]})
         else:
             try:
-                product_id = await db.upsert_product(result)
+                product_id = await db.upsert_product(result, str(client.id))
                 output.append({"url": result.url, "status": "completed", "product_id": product_id, "product": result})
             except Exception as exc:
                 logger.exception("DB upsert failed for %s", result.url)
@@ -245,8 +254,11 @@ async def get_job_status(job_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/{product_id}",)
-async def get_product(product_id: str):
-    product = await db.get_product(product_id)
+async def get_product(
+    product_id: str,
+    client: Client = Depends(get_current_client)
+):
+    product = await db.get_product(product_id, str(client.id))
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return product
@@ -258,22 +270,23 @@ async def get_product(product_id: str):
 
 @router.get("/", response_model=list[dict])
 async def list_products(
+    client: Client = Depends(get_current_client),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     aliexpress_id: Optional[str] = None,
 ):
-    return await db.list_products(limit=limit, offset=offset, aliexpress_id=aliexpress_id)
+    return await db.list_products(limit=limit, offset=offset, aliexpress_id=aliexpress_id, client_id=str(client.id))
 
 
 # ---------------------------------------------------------------------------
 # Background task
 # ---------------------------------------------------------------------------
 
-async def _run_scrape_job(job_id: str, url: str) -> None:
+async def _run_scrape_job(job_id: str, url: str, client_id: str, scrapfly_api_key: str) -> None:
     try:
         await db.update_job_status(job_id, "running")
-        product = await scrape_product(url)
-        product_id = await db.upsert_product(product)
+        product = await scrape_product(url, scrapfly_api_key)
+        product_id = await db.upsert_product(product, client_id)
         await db.update_job_status(job_id, "completed", product_id=product_id)
         logger.info("Job %s completed — product %s", job_id, product_id)
     except Exception as exc:

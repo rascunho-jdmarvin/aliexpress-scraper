@@ -36,7 +36,7 @@ def _html_to_text(html_content: str) -> str:
         text = re.sub(r'<.*?>', ' ', html_content)
         return ' '.join(text.split())
 
-async def get_description_with_playwright(url: str, aliexpress_id: str) -> str:
+async def get_description_with_playwright(url: str, aliexpress_id: str, client_id: str) -> str:
     """
     Extracts the product description from an AliExpress page using Playwright,
     following a robust multi-strategy approach.
@@ -47,25 +47,28 @@ async def get_description_with_playwright(url: str, aliexpress_id: str) -> str:
         try:
             await page.goto(url, wait_until="load", timeout=90000)
 
-            # 1. Click "See More" button to expand description
+            # 1. Click "See More" button to expand description and trigger iframe load
             try:
                 see_more_button = page.locator("xpath=//div[contains(@class, 'extend--wrap')]/button")
                 if await see_more_button.count() > 0:
                     await see_more_button.click()
-                    # Wait for the button to disappear or for a short timeout
-                    await page.wait_for_selector(
-                        "xpath=//div[contains(@class, 'extend--wrap')]/button",
-                        state='hidden',
-                        timeout=3000
-                    )
                     logger.info("Clicked 'See More' to expand description.")
+                    # Wait a moment for the iframe to start loading
+                    await page.wait_for_timeout(2000)
             except Exception:
-                # Button might not exist or didn't disappear, which is fine.
+                # Button might not exist, which is fine.
                 logger.info("'See More' button not found or action timed out, continuing.")
                 pass
 
             # 2. Check for description inside an iframe (common pattern)
+            # AliExpress wraps everything in #nav-description / [class*='description--wrap']
+            # and the iframe sits inside extend--wrap beside #product-description.
             iframe_selectors = [
+                "#nav-description iframe",
+                "[class*='description--wrap'] iframe",
+                "[class*='extend--iframe']",
+                "div[data-pl='product-description'] ~ iframe",
+                "div[data-pl='product-description'] + iframe",
                 "iframe.description-iframe",
                 "iframe[src*='alicdn.com']",
                 "iframe[id*='description']",
@@ -74,6 +77,14 @@ async def get_description_with_playwright(url: str, aliexpress_id: str) -> str:
                 try:
                     iframe_element = page.locator(selector).first
                     if await iframe_element.count() > 0:
+                        # Wait for the iframe to receive a src and load
+                        try:
+                            await page.wait_for_function(
+                                f"document.querySelector(\"{selector}\")?.src?.length > 0",
+                                timeout=8000,
+                            )
+                        except Exception:
+                            pass  # src might already be set or not needed
                         frame = await iframe_element.content_frame()
                         if frame:
                             await frame.wait_for_load_state("domcontentloaded", timeout=8000)
@@ -82,7 +93,7 @@ async def get_description_with_playwright(url: str, aliexpress_id: str) -> str:
                                 logger.info(f"Description found in iframe: {selector}")
                                 await browser.close()
                                 # Update the product description in the database
-                                await db.update_product_description(aliexpress_id, html_content)
+                                await db.update_product_description(aliexpress_id, client_id, html_content)
                                 return html_content
                 except Exception as e:
                     logger.warning(f"Iframe selector '{selector}' failed: {e}")
@@ -107,7 +118,7 @@ async def get_description_with_playwright(url: str, aliexpress_id: str) -> str:
                             logger.info(f"Description found via DOM selector: {selector}")
                             await browser.close()
                             # Update the product description in the database
-                            await db.update_product_description(aliexpress_id, html_content)
+                            await db.update_product_description(aliexpress_id, client_id, html_content)
                             return html_content
                 except Exception as e:
                     logger.warning(f"DOM selector '{selector}' failed: {e}")
@@ -124,7 +135,7 @@ async def get_description_with_playwright(url: str, aliexpress_id: str) -> str:
                 product_id = "unknown"
             return f"No description found for product ID {product_id} due to an error."
         finally:
-            if not browser.is_closed():
+            if browser and browser.is_connected():
                 await browser.close()
 
 if __name__ == '__main__':
@@ -139,7 +150,7 @@ if __name__ == '__main__':
 
         print(f"Testing with URL: {test_url}")
         print(f"Extracted AliExpress ID: {aliexpress_id}")
-        description = await get_description_with_playwright(test_url, aliexpress_id)
+        description = await get_description_with_playwright(test_url, aliexpress_id, "test_client_id")
         print("\n--- Extracted Description ---")
         print(description)
         print("---------------------------\n")

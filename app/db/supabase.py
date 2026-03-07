@@ -32,9 +32,10 @@ class SupabaseDB:
     # Products
     # ------------------------------------------------------------------
 
-    async def upsert_product(self, product: ProductData) -> str:
+    async def upsert_product(self, product: ProductData, client_id: str) -> str:
         """Insert or update a product and its variants. Returns the product UUID."""
         product_row = {
+            "client_id": client_id,
             "aliexpress_id": product.aliexpress_id,
             "url": product.url,
             "title": product.title,
@@ -55,7 +56,7 @@ class SupabaseDB:
 
         response = (
             self.client.table("products")
-            .upsert(product_row, on_conflict="aliexpress_id")
+            .upsert(product_row, on_conflict="client_id,aliexpress_id")
             .execute()
         )
         product_id: str = response.data[0]["id"]
@@ -81,21 +82,23 @@ class SupabaseDB:
         logger.info("Upserted product %s (uuid=%s) with %d variants", product.aliexpress_id, product_id, len(product.variants))
         return product_id
 
-    async def get_product(self, product_id: str) -> Optional[dict]:
+    async def get_product(self, product_id: str, client_id: str) -> Optional[dict]:
         response = (
             self.client.table("products")
             .select("*, product_variants(*)")
             .eq("id", product_id)
+            .eq("client_id", client_id)
             .maybe_single()
             .execute()
         )
         return response.data
     
-    async def get_product_by_aliexpress_id(self, aliexpress_id: str) -> Optional[dict]:
+    async def get_product_by_aliexpress_id(self, aliexpress_id: str, client_id: str) -> Optional[dict]:
         response = (
             self.client.table("products")
             .select("*, product_variants(*)")
             .eq("aliexpress_id", aliexpress_id)
+            .eq("client_id", client_id)
             .maybe_single()
             .execute()
         )
@@ -103,11 +106,12 @@ class SupabaseDB:
 
     async def list_products(
         self,
+        client_id: str,
         limit: int = 20,
         offset: int = 0,
         aliexpress_id: Optional[str] = None,
     ) -> list[dict]:
-        query = self.client.table("products").select("id, aliexpress_id, title, price_min, price_max, currency, rating, orders_count, created_at")
+        query = self.client.table("products").select("id, aliexpress_id, title, price_min, price_max, currency, rating, orders_count, created_at").eq("client_id", client_id)
         if aliexpress_id:
             query = query.eq("aliexpress_id", aliexpress_id)
         response = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
@@ -161,8 +165,8 @@ class SupabaseDB:
             "completed_at": str(row.get("completed_at", "")) if row.get("completed_at") else None,
         }
 
-    async def update_product_description(self, aliexpress_id: str, description: str) -> None:
-        self.client.table("products").update({"description": description}).eq("aliexpress_id", aliexpress_id).execute()
+    async def update_product_description(self, aliexpress_id: str, client_id: str, description: str) -> None:
+        self.client.table("products").update({"description": description}).eq("aliexpress_id", aliexpress_id).eq("client_id", client_id).execute()
 
     # ------------------------------------------------------------------
     # Clients
