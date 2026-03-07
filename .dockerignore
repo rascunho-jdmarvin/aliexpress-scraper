@@ -1,0 +1,12 @@
+__pycache__
+.venv
+venv
+env
+.env
+.git
+.gitignore
+.vscode
+*.pyc
+*.pyo
+.pytest_cache
+retorno.json
