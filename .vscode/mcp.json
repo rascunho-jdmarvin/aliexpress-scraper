@@ -1,0 +1,31 @@
+{
+	"servers": {
+		"railway-mcp-server": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"@railway/mcp-server"
+			]
+		},
+		"shopify-dev-mcp": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@shopify/dev-mcp@latest"
+			]
+		},
+		"playwright": {
+			"url": "http://localhost:8931/mcp"
+		},
+		"supabase": {
+			"type": "http",
+			"url": "https://mcp.supabase.com/mcp"
+		},
+		"scrapfly-cloud-mcp": {
+			"type": "http",
+			"url": "https://mcp.scrapfly.io/mcp?key=scp-live-b8d69d1bf3be487784b856425d2d3ef2"
+		}
+	},
+	"inputs": []
+}
