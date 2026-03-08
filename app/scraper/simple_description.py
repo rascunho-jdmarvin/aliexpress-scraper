@@ -78,7 +78,7 @@ async def _check_and_solve_recaptcha(page):
             
             async with recaptchav2.AsyncSolver(
                 page, 
-                capsolver_api_key="CAP-B36AF1283C336B152230DA5D996E04FD4A261908EF2D52A2E659B7E81B353CA4"
+                capsolver_api_key=settings.CAPSOLVER_API_KEY
             ) as solver:
                 try:
                     token = await solver.solve_recaptcha(wait=True, image_challenge=True)
