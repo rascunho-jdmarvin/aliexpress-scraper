@@ -3,8 +3,8 @@ from playwright.async_api import async_playwright
 from playwright_recaptcha import recaptchav2
 import unicodedata
 
-ZENROW_API_KEY = "5621f1c694fc6f01ee65dd71f4d43d34757e0ad6"
-URL_ZENROW = f"wss://browser.zenrows.com?apikey={ZENROW_API_KEY}&proxy_region=sa"
+ZENROW_API_KEY = None # "5621f1c694fc6f01ee65dd71f4d43d34757e0ad6"
+URL_ZENROW = f"wss://browser.zenrows.com?apikey={ZENROW_API_KEY}&proxy_country=br"
 
 async def scrape_aliexpress_product(url: str):
     """
@@ -13,7 +13,9 @@ async def scrape_aliexpress_product(url: str):
     async with async_playwright() as p:
         # Podemos escolher entre 'chromium', 'firefox', ou 'webkit'
         if not ZENROW_API_KEY:
-            browser = await p.chromium.launch(headless=True)  # headless=False para ver o navegador
+            browser = await p.chromium.launch(headless=False)
+            page = await browser.new_page()
+            print(f"Navegando para {url}...")
             try:
                 # Aumentar o timeout para 60 segundos
                 await page.goto(url, wait_until="networkidle", timeout=60000)
@@ -21,18 +23,23 @@ async def scrape_aliexpress_product(url: str):
                 await asyncio.sleep(10)  # Pequena pausa para garantir que o navegador esteja pronto
                 
                 print("Verificando e resolvendo reCAPTCHA, se presente...")
-                await _check_and_solve_recaptcha(page)  # Verifica e resolve reCAPTCHA antes de navegar
+                await _check_and_solve_recaptcha(page)
+                await asyncio.sleep(5) 
+                
+                print("Navegação e interações concluídas.")
             except Exception as e:
                 print(f"Ocorreu um erro: {e}")    
         else:
             browser = await p.chromium.connect_over_cdp(URL_ZENROW)
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
 
-        page = await browser.new_page()
-        print(f"Navegando para {url}...")
-
+            page = await context.new_page()
+            print(f"Navegando para {url}...")
         
         try:
-            await page.goto(url)
+            if ZENROW_API_KEY:
+                await page.goto(url)
+                
             page_title = await page.title()
             name = await page.locator("xpath=//h1[@data-pl]").text_content()
             name = unicodedata.normalize('NFKD', name).encode('utf-8').decode('utf-8') if name else None
@@ -70,10 +77,24 @@ async def _check_and_solve_recaptcha(page):
                     print(f"❌ Falha ao resolver reCAPTCHA: {e}")
         else:
             print("ℹ️ Nenhum reCAPTCHA detectado")
-            
+
+async def _checar_drawer_login(page):
+    """Verifica se o drawer de login está presente e tenta fechá-lo"""
+    try:
+        # Verificar se o drawer de login está presente
+        button = await page.query_selector('button[class*="cosmos-drawer-close"]')
+        if button:
+            print("🔒 Drawer de login detectado, tentando fechar...")
+            await button.click()
+            print("✅ Drawer de login fechado.")
+            await asyncio.sleep(2)  # Pequena pausa para garantir que o drawer foi fechado
+        else:
+            print("ℹ️ Nenhum drawer de login detectado.")
+    except Exception as e:
+        print(f"❌ Erro ao verificar/fechar drawer de login: {e}")
             
 async def main():
-    aliexpress_url = "https://pt.aliexpress.com/item/1005006090932595.html"
+    aliexpress_url = "https://pt.aliexpress.com/item/1005009054836787.html"
     await scrape_aliexpress_product(aliexpress_url)
 
 if __name__ == "__main__":
