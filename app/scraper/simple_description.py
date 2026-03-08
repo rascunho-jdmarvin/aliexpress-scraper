@@ -2,12 +2,13 @@ import logging
 import asyncio
 from playwright.async_api import async_playwright
 from playwright_recaptcha import recaptchav2
+from playwright_stealth import stealth_async
 import unicodedata
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ZENROW_API_KEY = None # "5621f1c694fc6f01ee65dd71f4d43d34757e0ad6"
+ZENROW_API_KEY = "5621f1c694fc6f01ee65dd71f4d43d34757e0ad6" # "5621f1c694fc6f01ee65dd71f4d43d34757e0ad6"
 URL_ZENROW = f"wss://browser.zenrows.com?apikey={ZENROW_API_KEY}&proxy_country=br"
 
 async def scrape_aliexpress_product(url: str):
@@ -17,19 +18,18 @@ async def scrape_aliexpress_product(url: str):
     async with async_playwright() as p:
         # Podemos escolher entre 'chromium', 'firefox', ou 'webkit'
         if not ZENROW_API_KEY:
-            browser = await p.chromium.launch(headless=False)
+            browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
             print(f"Navegando para {url}...")
             try:
-                # Aumentar o timeout para 60 segundos
-                await page.goto(url, wait_until="networkidle", timeout=60000)
+                await  stealth_async(page) 
+                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 print("Página carregada com sucesso.")
-                await asyncio.sleep(10)  # Pequena pausa para garantir que o navegador esteja pronto
-                
+
                 print("Verificando e resolvendo reCAPTCHA, se presente...")
+                await asyncio.sleep(10)  # Pequena pausa para garantir que a página está pronta para verificação
                 await _check_and_solve_recaptcha(page)
-                await asyncio.sleep(5) 
-                
+
                 print("Navegação e interações concluídas.")
             except Exception as e:
                 print(f"Ocorreu um erro: {e}")    
@@ -45,10 +45,8 @@ async def scrape_aliexpress_product(url: str):
                 await page.goto(url)
                 
             page_title = await page.title()
-            name = await page.locator("xpath=//h1[@data-pl]").text_content()
-            name = unicodedata.normalize('NFKD', name).encode('utf-8').decode('utf-8') if name else None
 
-            get_description_with_playwright(page)
+            await get_description_with_playwright(page)
             print(f"Título da Página: {page_title}")
 
             # Você pode adicionar mais lógica de scraping aqui.
@@ -76,8 +74,7 @@ async def _check_and_solve_recaptcha(page):
                 try:
                     token = await solver.solve_recaptcha(wait=True, image_challenge=True)
                     print(f"✅ reCAPTCHA resolvido: {token[:50]}...")
-                    await asyncio.sleep(2)
-                    
+
                 except Exception as e:
                     print(f"❌ Falha ao resolver reCAPTCHA: {e}")
         else:
@@ -90,6 +87,7 @@ async def get_description_with_playwright(page) -> str:
     """
     # 1. Click "See More" button to expand description and trigger iframe load
     try:
+        await _check_and_solve_recaptcha(page)
         see_more_button = page.locator("xpath=//div[contains(@class, 'extend--wrap')]/button")
         if await see_more_button.count() > 0:
             await see_more_button.click()
@@ -102,40 +100,29 @@ async def get_description_with_playwright(page) -> str:
         pass
 
     # 2. Check for description inside an iframe (common pattern)
-    # AliExpress wraps everything in #nav-description / [class*='description--wrap']
-    # and the iframe sits inside extend--wrap beside #product-description.
-    iframe_selectors = [
-        "#nav-description iframe",
-        "[class*='description--wrap'] iframe",
-        "[class*='extend--iframe']",
-        "div[data-pl='product-description'] ~ iframe",
-        "div[data-pl='product-description'] + iframe",
-        "iframe.description-iframe",
-        "iframe[src*='alicdn.com']",
-        "iframe[id*='description']",
-    ]
-    for selector in iframe_selectors:
-        try:
-            iframe_element = page.locator(selector).first
-            if await iframe_element.count() > 0:
-                # Wait for the iframe to receive a src and load
-                try:
-                    await page.wait_for_function(
-                        f"document.querySelector(\"{selector}\")?.src?.length > 0",
-                        timeout=8000,
-                    )
-                except Exception:
-                    pass  # src might already be set or not needed
-                frame = await iframe_element.content_frame()
-                if frame:
-                    await frame.wait_for_load_state("domcontentloaded", timeout=8000)
-                    html_content = await frame.inner_html("body", timeout=5000)
-                    if html_content and len(html_content.strip()) > 50:
-                        logger.info(f"Description found in iframe: {selector}")
-                        return html_content
-        except Exception as e:
-            logger.warning(f"Iframe selector '{selector}' failed: {e}")
-            continue
+    # Combine all selectors into one query to avoid sequential timeouts.
+    combined_iframe_selector = (
+        "#nav-description iframe, "
+        "[class*='description--wrap'] iframe, "
+        "[class*='extend--iframe'], "
+        "div[data-pl='product-description'] ~ iframe, "
+        "iframe.description-iframe, "
+        "iframe[src*='alicdn.com'], "
+        "iframe[id*='description']"
+    )
+    try:
+        iframe_element = page.locator(combined_iframe_selector).first
+        if await iframe_element.count() > 0:
+            frame = await iframe_element.content_frame()
+            if frame:
+                await frame.wait_for_load_state("domcontentloaded", timeout=8000)
+                html_content = await frame.inner_html("body", timeout=5000)
+                if html_content and len(html_content.strip()) > 50:
+                    print(f"{html_content}")
+                    logger.info("Description found in iframe.")
+                    return html_content
+    except Exception as e:
+        logger.warning(f"Iframe extraction failed: {e}")
     
     # 3. Waterfall through common DOM selectors for the description
     dom_selectors = [
@@ -144,7 +131,7 @@ async def get_description_with_playwright(page) -> str:
         ".detailmodule_html",
         ".detail-desc-decorate-richtext",
         "#nav-description",
-        ".product-description",
+        ".product-descr\ption",
         "[class*='description-content']",
     ]
     for selector in dom_selectors:
@@ -154,6 +141,7 @@ async def get_description_with_playwright(page) -> str:
                 html_content = await element.inner_html(timeout=5000)
                 if html_content and len(html_content.strip()) > 50:
                     logger.info(f"Description found via DOM selector: {selector}")
+                    print(f"{html_content}")
                     return html_content
         except Exception as e:
             logger.warning(f"DOM selector '{selector}' failed: {e}")
