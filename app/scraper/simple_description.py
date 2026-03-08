@@ -4,17 +4,25 @@ from playwright.async_api import async_playwright
 from playwright_recaptcha import recaptchav2
 from playwright_stealth import stealth_async
 import unicodedata
+from app.db.supabase import db
+from app.config import settings
+from app.scraper.scrapfly_aliexpress import LOCALE_MAP, DEFAULT_LOCALE
+from urllib.parse import urlparse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ZENROW_API_KEY = "5621f1c694fc6f01ee65dd71f4d43d34757e0ad6" # "5621f1c694fc6f01ee65dd71f4d43d34757e0ad6"
-URL_ZENROW = f"wss://browser.zenrows.com?apikey={ZENROW_API_KEY}&proxy_country=br"
-
-async def scrape_aliexpress_product(url: str):
+async def scrape_aliexpress_product(url: str, aliexpress_id: str, client_id: str):
     """
     Abre uma página de produto do AliExpress usando o Playwright.
     """
+    
+    host = urlparse(url).hostname or ""
+    locale = LOCALE_MAP.get(host, DEFAULT_LOCALE)
+    
+    ZENROW_API_KEY = settings.ZENROW_API_KEY
+    URL_ZENROW = f"wss://browser.zenrows.com?apikey={ZENROW_API_KEY}&proxy_country={locale['country'].lower()}"
+    
     async with async_playwright() as p:
         # Podemos escolher entre 'chromium', 'firefox', ou 'webkit'
         if not ZENROW_API_KEY:
@@ -46,7 +54,8 @@ async def scrape_aliexpress_product(url: str):
                 
             page_title = await page.title()
 
-            await get_description_with_playwright(page)
+            description = await get_description_with_playwright(page)
+            await db.update_product_description(aliexpress_id, client_id, description)
             print(f"Título da Página: {page_title}")
 
             # Você pode adicionar mais lógica de scraping aqui.
@@ -118,7 +127,6 @@ async def get_description_with_playwright(page) -> str:
                 await frame.wait_for_load_state("domcontentloaded", timeout=8000)
                 html_content = await frame.inner_html("body", timeout=5000)
                 if html_content and len(html_content.strip()) > 50:
-                    print(f"{html_content}")
                     logger.info("Description found in iframe.")
                     return html_content
     except Exception as e:
@@ -141,7 +149,6 @@ async def get_description_with_playwright(page) -> str:
                 html_content = await element.inner_html(timeout=5000)
                 if html_content and len(html_content.strip()) > 50:
                     logger.info(f"Description found via DOM selector: {selector}")
-                    print(f"{html_content}")
                     return html_content
         except Exception as e:
             logger.warning(f"DOM selector '{selector}' failed: {e}")

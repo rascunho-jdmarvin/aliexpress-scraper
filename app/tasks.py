@@ -69,13 +69,13 @@ def scrape_description_task(self, job_id: str, product_url: str, scrapfly_api_ke
     Tarefa Celery para fazer scraping da descrição de um produto do AliExpress.
     Orquestra o processo de scraping e atualiza o status do job no banco de dados.
     """
-    from app.scraper.extract_aliexpress_description import get_description_with_playwright
+    from app.scraper.simple_description import scrape_aliexpress_product
     logger.info("Iniciando job de scraping da descrição [ID: %s] para a URL: %s", job_id, product_url)
 
     try:
         # Executa o scraping da descrição (a própria função atualiza o banco de dados)
         description_result = asyncio.run(
-            get_description_with_playwright(product_url, aliexpress_id, client_id)
+            scrape_aliexpress_product(product_url, aliexpress_id, client_id)
         )
 
         logger.info("Scraping da descrição concluído com sucesso para o job [ID: %s]. %s", job_id, description_result)

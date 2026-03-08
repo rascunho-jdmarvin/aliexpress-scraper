@@ -685,7 +685,7 @@ def _create_combinations(
 
         variants.append(
             VariantCombination(
-                sku_id=f"SKU-{uuid.uuid4().hex[:8].upper()}",
+                sku_id=f"{uuid.uuid4().hex[:10].upper()}",
                 attributes=attributes,
                 price_original=pricing.get("compare_at_price") if isinstance(pricing.get("compare_at_price"), float) else pricing.get("price"),
                 price_discounted=pricing.get("price"),

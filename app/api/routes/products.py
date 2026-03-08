@@ -7,9 +7,9 @@ from pydantic import BaseModel, Field
 
 from app.models.client import Client
 from app.auth.dependencies import get_current_client
+from app.scraper.simple_description import scrape_aliexpress_product
 from app.tasks import scrape_product_task
 from app.models.product import ScrapeRequest, ScrapeBatchRequest, ScrapeResponse, ScrapeJobStatus, ProductData
-from app.scraper.extract_aliexpress_description import get_description_with_playwright
 from app.scraper.scrapfly_aliexpress import scrape_product, scrape_products_batch
 from app.db.supabase import db
 
@@ -178,7 +178,7 @@ async def scrape_product_sync(
         await db.update_job_status(job_id, "running")
         product = await scrape_product(request.url, client.scrapfly_api_key)
         product_id = await db.upsert_product(product, str(client.id))
-        asyncio.create_task(get_description_with_playwright(product.url, product.aliexpress_id, str(client.id)))
+        asyncio.create_task(scrape_aliexpress_product(product.url, product.aliexpress_id, str(client.id)))
         await db.update_job_status(job_id, "completed", product_id=product_id)
         return ScrapeResponse(job_id=job_id, status="completed", product=product)
     except Exception as exc:
