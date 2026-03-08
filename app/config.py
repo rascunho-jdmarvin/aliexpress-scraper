@@ -23,6 +23,15 @@ class Settings(BaseSettings):
 
     debug: bool = False
     log_level: str = "INFO"
+    
+    encription_key: str = ""
+    
+    redis_url: str = "redis://localhost:6379/0"
+    capsolver_secret_key: str = ""
+    
+    zenrow_api_key: str = ""
+    
+    webhook_url: Optional[str] = None
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
