@@ -1,7 +1,11 @@
+import logging
 import asyncio
 from playwright.async_api import async_playwright
 from playwright_recaptcha import recaptchav2
 import unicodedata
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 ZENROW_API_KEY = None # "5621f1c694fc6f01ee65dd71f4d43d34757e0ad6"
 URL_ZENROW = f"wss://browser.zenrows.com?apikey={ZENROW_API_KEY}&proxy_country=br"
@@ -44,6 +48,7 @@ async def scrape_aliexpress_product(url: str):
             name = await page.locator("xpath=//h1[@data-pl]").text_content()
             name = unicodedata.normalize('NFKD', name).encode('utf-8').decode('utf-8') if name else None
 
+            get_description_with_playwright(page)
             print(f"Título da Página: {page_title}")
 
             # Você pode adicionar mais lógica de scraping aqui.
@@ -78,6 +83,83 @@ async def _check_and_solve_recaptcha(page):
         else:
             print("ℹ️ Nenhum reCAPTCHA detectado")
 
+async def get_description_with_playwright(page) -> str:
+    """
+    Extracts the product description from an AliExpress page using Playwright,
+    following a robust multi-strategy approach.
+    """
+    # 1. Click "See More" button to expand description and trigger iframe load
+    try:
+        see_more_button = page.locator("xpath=//div[contains(@class, 'extend--wrap')]/button")
+        if await see_more_button.count() > 0:
+            await see_more_button.click()
+            logger.info("Clicked 'See More' to expand description.")
+            # Wait a moment for the iframe to start loading
+            await page.wait_for_timeout(2000)
+    except Exception:
+        # Button might not exist, which is fine.
+        logger.info("'See More' button not found or action timed out, continuing.")
+        pass
+
+    # 2. Check for description inside an iframe (common pattern)
+    # AliExpress wraps everything in #nav-description / [class*='description--wrap']
+    # and the iframe sits inside extend--wrap beside #product-description.
+    iframe_selectors = [
+        "#nav-description iframe",
+        "[class*='description--wrap'] iframe",
+        "[class*='extend--iframe']",
+        "div[data-pl='product-description'] ~ iframe",
+        "div[data-pl='product-description'] + iframe",
+        "iframe.description-iframe",
+        "iframe[src*='alicdn.com']",
+        "iframe[id*='description']",
+    ]
+    for selector in iframe_selectors:
+        try:
+            iframe_element = page.locator(selector).first
+            if await iframe_element.count() > 0:
+                # Wait for the iframe to receive a src and load
+                try:
+                    await page.wait_for_function(
+                        f"document.querySelector(\"{selector}\")?.src?.length > 0",
+                        timeout=8000,
+                    )
+                except Exception:
+                    pass  # src might already be set or not needed
+                frame = await iframe_element.content_frame()
+                if frame:
+                    await frame.wait_for_load_state("domcontentloaded", timeout=8000)
+                    html_content = await frame.inner_html("body", timeout=5000)
+                    if html_content and len(html_content.strip()) > 50:
+                        logger.info(f"Description found in iframe: {selector}")
+                        return html_content
+        except Exception as e:
+            logger.warning(f"Iframe selector '{selector}' failed: {e}")
+            continue
+    
+    # 3. Waterfall through common DOM selectors for the description
+    dom_selectors = [
+        "#product-description",
+        "div[data-pl='product-description']",
+        ".detailmodule_html",
+        ".detail-desc-decorate-richtext",
+        "#nav-description",
+        ".product-description",
+        "[class*='description-content']",
+    ]
+    for selector in dom_selectors:
+        try:
+            element = page.locator(selector).first
+            if await element.count() > 0:
+                html_content = await element.inner_html(timeout=5000)
+                if html_content and len(html_content.strip()) > 50:
+                    logger.info(f"Description found via DOM selector: {selector}")
+                    return html_content
+        except Exception as e:
+            logger.warning(f"DOM selector '{selector}' failed: {e}")
+            continue
+
+                
 async def _checar_drawer_login(page):
     """Verifica se o drawer de login está presente e tenta fechá-lo"""
     try:
